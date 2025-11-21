@@ -1,0 +1,5 @@
+{
+  "name": "Gestão ROE",
+  "description": "Um aplicativo para preencher e visualizar diariamente o número de pacientes atendidos e a receita mensal da sua empresa, com relatórios detalhados e comparativos anuais.",
+  "requestFramePermissions": []
+}
