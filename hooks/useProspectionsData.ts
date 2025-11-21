@@ -1,51 +1,55 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import type { ProspectionsData, Prospection } from '../types';
-
-const STORAGE_KEY = 'prospectionsData';
+import { supabase } from '../supabaseClient';
 
 export const useProspectionsData = () => {
   const [prospectionsData, setProspectionsData] = useState<ProspectionsData>([]);
 
+  const fetchData = async () => {
+    const { data, error } = await supabase.from('prospections').select('*');
+    if (error) {
+        console.error("Failed to load prospections:", error.message);
+        return;
+    }
+    if (data) {
+        const formatted = data.map((row: any) => ({
+            id: row.id,
+            dentistName: row.dentist_name,
+            meetingDate: row.meeting_date
+        }));
+        setProspectionsData(formatted);
+    }
+  };
+
   useEffect(() => {
-    try {
-      const storedData = localStorage.getItem(STORAGE_KEY);
-      if (storedData) {
-        setProspectionsData(JSON.parse(storedData));
-      }
-    } catch (error) {
-      console.error("Failed to load prospections data from localStorage", error);
+    fetchData();
+  }, []);
+
+  const addProspection = useCallback(async (dentistName: string, meetingDate: string) => {
+    // For optimistic update we need a temp ID, but since we are inserting, we can just wait or fetch.
+    // To keep it snappy, let's insert and refresh.
+    const { error } = await supabase.from('prospections').insert({
+        dentist_name: dentistName,
+        meeting_date: meetingDate
+    });
+
+    if (error) {
+        console.error('Error adding prospection:', error.message);
+    } else {
+        fetchData();
     }
   }, []);
 
-  const saveData = useCallback((data: ProspectionsData) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      setProspectionsData(data);
-    } catch (error) {
-      console.error("Failed to save prospections data to localStorage", error);
+  const deleteProspection = useCallback(async (id: number) => {
+    setProspectionsData(prevData => prevData.filter(p => p.id !== id));
+
+    const { error } = await supabase.from('prospections').delete().eq('id', id);
+    if (error) {
+        console.error('Error deleting prospection:', error.message);
+        fetchData();
     }
   }, []);
-
-  const addProspection = useCallback((dentistName: string, meetingDate: string) => {
-    const newProspection: Prospection = {
-      id: Date.now(),
-      dentistName,
-      meetingDate,
-    };
-    setProspectionsData(prevData => {
-      const newData = [...prevData, newProspection];
-      saveData(newData);
-      return newData;
-    });
-  }, [saveData]);
-
-  const deleteProspection = useCallback((id: number) => {
-    setProspectionsData(prevData => {
-      const newData = prevData.filter(p => p.id !== id);
-      saveData(newData);
-      return newData;
-    });
-  }, [saveData]);
 
   return { prospectionsData, addProspection, deleteProspection };
 };

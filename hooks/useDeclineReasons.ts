@@ -1,32 +1,31 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import type { DeclineReasonsData, DeclineReason } from '../types';
-
-const STORAGE_KEY = 'declineReasonsData';
+import { supabase } from '../supabaseClient';
 
 export const useDeclineReasons = () => {
   const [declineReasons, setDeclineReasons] = useState<DeclineReasonsData>({});
 
+  const fetchData = async () => {
+    const { data, error } = await supabase.from('decline_reasons').select('*');
+    if (error) {
+        console.error("Failed to load decline reasons:", error.message);
+        return;
+    }
+    const formatted: DeclineReasonsData = {};
+    if (data) {
+        data.forEach((row: any) => {
+            formatted[row.key] = row.reason as DeclineReason;
+        });
+    }
+    setDeclineReasons(formatted);
+  };
+
   useEffect(() => {
-    try {
-      const storedData = localStorage.getItem(STORAGE_KEY);
-      if (storedData) {
-        setDeclineReasons(JSON.parse(storedData));
-      }
-    } catch (error) {
-      console.error("Failed to load decline reasons data from localStorage", error);
-    }
+    fetchData();
   }, []);
 
-  const saveData = useCallback((data: DeclineReasonsData) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      setDeclineReasons(data);
-    } catch (error) {
-      console.error("Failed to save decline reasons data to localStorage", error);
-    }
-  }, []);
-
-  const updateDeclineReason = useCallback((key: string, reason: DeclineReason) => {
+  const updateDeclineReason = useCallback(async (key: string, reason: DeclineReason) => {
     setDeclineReasons(prevData => {
       const newData = { ...prevData };
       if (reason === '') {
@@ -34,10 +33,17 @@ export const useDeclineReasons = () => {
       } else {
         newData[key] = reason;
       }
-      saveData(newData);
       return newData;
     });
-  }, [saveData]);
+
+    if (reason === '') {
+        const { error } = await supabase.from('decline_reasons').delete().eq('key', key);
+        if (error) { console.error('Error deleting reason:', error.message); fetchData(); }
+    } else {
+        const { error } = await supabase.from('decline_reasons').upsert({ key, reason }, { onConflict: 'key' });
+        if (error) { console.error('Error updating reason:', error.message); fetchData(); }
+    }
+  }, []);
 
   return { declineReasons, updateDeclineReason };
 };

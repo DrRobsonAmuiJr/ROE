@@ -1,56 +1,76 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import type { MonthlyFinancialData, MonthlyFinancials } from '../types';
-
-const STORAGE_KEY = 'monthlyFinancialData';
+import { supabase } from '../supabaseClient';
 
 export const useMonthlyFinancialData = () => {
   const [monthlyFinancialData, setMonthlyFinancialData] = useState<MonthlyFinancialData>({});
 
+  const fetchData = async () => {
+    const { data, error } = await supabase.from('monthly_financials').select('*');
+    if (error) {
+        console.error("Failed to load monthly financial data:", error.message);
+        return;
+    }
+    
+    const formatted: MonthlyFinancialData = {};
+    if (data) {
+        data.forEach((row: any) => {
+            if (!formatted[row.year]) formatted[row.year] = {};
+            formatted[row.year][row.month] = {
+                monthlyRevenue: row.monthly_revenue,
+                monthlyProfit: row.monthly_profit,
+                dividends: row.dividends,
+                monthlyReserve: row.monthly_reserve
+            };
+        });
+    }
+    setMonthlyFinancialData(formatted);
+  };
+
   useEffect(() => {
-    try {
-      const storedData = localStorage.getItem(STORAGE_KEY);
-      if (storedData) {
-        setMonthlyFinancialData(JSON.parse(storedData));
-      }
-    } catch (error) {
-      console.error("Failed to load monthly financial data from localStorage", error);
-    }
+    fetchData();
   }, []);
 
-  const saveData = useCallback((data: MonthlyFinancialData) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      setMonthlyFinancialData(data);
-    } catch (error) {
-      console.error("Failed to save monthly financial data to localStorage", error);
-    }
-  }, []);
-
-  const updateMonthlyEntry = useCallback((year: string, month: string, data: MonthlyFinancials) => {
+  const updateMonthlyEntry = useCallback(async (year: string, month: string, data: MonthlyFinancials) => {
     setMonthlyFinancialData(prevData => {
       const newData = JSON.parse(JSON.stringify(prevData));
-      if (!newData[year]) {
-        newData[year] = {};
-      }
+      if (!newData[year]) newData[year] = {};
       newData[year][month] = data;
-      saveData(newData);
       return newData;
     });
-  }, [saveData]);
 
-  const deleteMonthlyEntry = useCallback((year: string, month: string) => {
+    const { error } = await supabase.from('monthly_financials').upsert({
+        year,
+        month,
+        monthly_revenue: data.monthlyRevenue,
+        monthly_profit: data.monthlyProfit,
+        dividends: data.dividends,
+        monthly_reserve: data.monthlyReserve
+    }, { onConflict: 'year,month' });
+
+    if (error) {
+        console.error('Error updating monthly entry:', error.message);
+        fetchData();
+    }
+  }, []);
+
+  const deleteMonthlyEntry = useCallback(async (year: string, month: string) => {
     setMonthlyFinancialData(prevData => {
       const newData = JSON.parse(JSON.stringify(prevData));
       if (newData[year]?.[month]) {
         delete newData[year][month];
-        if (Object.keys(newData[year]).length === 0) {
-          delete newData[year];
-        }
+        if (Object.keys(newData[year]).length === 0) delete newData[year];
       }
-      saveData(newData);
       return newData;
     });
-  }, [saveData]);
+
+    const { error } = await supabase.from('monthly_financials').delete().match({ year, month });
+    if (error) {
+        console.error('Error deleting monthly entry:', error.message);
+        fetchData();
+    }
+  }, []);
 
   return { monthlyFinancialData, updateMonthlyEntry, deleteMonthlyEntry };
 };

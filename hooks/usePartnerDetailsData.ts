@@ -1,56 +1,83 @@
+
 import { useState, useEffect, useCallback } from 'react';
 import type { PartnerDetailsData, PartnerRecord } from '../types';
-
-const STORAGE_KEY = 'partnerDetailsData';
+import { supabase } from '../supabaseClient';
 
 export const usePartnerDetailsData = () => {
   const [partnerDetailsData, setPartnerDetailsData] = useState<PartnerDetailsData>({});
 
+  const fetchData = async () => {
+    const { data, error } = await supabase.from('partner_details').select('*');
+    if (error) {
+        console.error("Failed to load partner details:", error.message);
+        return;
+    }
+
+    const formatted: PartnerDetailsData = {};
+    if (data) {
+        data.forEach((row: any) => {
+            if (!formatted[row.year]) formatted[row.year] = {};
+            if (!formatted[row.year][row.month]) formatted[row.year][row.month] = [];
+            formatted[row.year][row.month].push({
+                dentistName: row.dentist_name,
+                examValue: row.exam_value
+            });
+        });
+    }
+    setPartnerDetailsData(formatted);
+  };
+
   useEffect(() => {
-    try {
-      const storedData = localStorage.getItem(STORAGE_KEY);
-      if (storedData) {
-        setPartnerDetailsData(JSON.parse(storedData));
-      }
-    } catch (error) {
-      console.error("Failed to load partner details data from localStorage", error);
-    }
+    fetchData();
   }, []);
 
-  const saveData = useCallback((data: PartnerDetailsData) => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      setPartnerDetailsData(data);
-    } catch (error) {
-      console.error("Failed to save partner details data to localStorage", error);
-    }
-  }, []);
-
-  const addPartnerDetails = useCallback((year: string, month: string, data: PartnerRecord[]) => {
+  const addPartnerDetails = useCallback(async (year: string, month: string, data: PartnerRecord[]) => {
+    // Optimistic UI update
     setPartnerDetailsData(prevData => {
       const newData = JSON.parse(JSON.stringify(prevData));
-      if (!newData[year]) {
-        newData[year] = {};
-      }
+      if (!newData[year]) newData[year] = {};
       newData[year][month] = data;
-      saveData(newData);
       return newData;
     });
-  }, [saveData]);
 
-  const deletePartnerDetails = useCallback((year: string, month: string) => {
+    // Transaction-like behavior: Delete existing for this month/year, then insert new
+    const { error: deleteError } = await supabase.from('partner_details').delete().match({ year, month });
+    if (deleteError) {
+        console.error("Error clearing existing partner details:", deleteError.message);
+        return;
+    }
+
+    // Chunk inserts if necessary (Supabase usually handles batch well, but large excel files might need chunks)
+    const rows = data.map(record => ({
+        year,
+        month,
+        dentist_name: record.dentistName,
+        exam_value: record.examValue
+    }));
+
+    const { error: insertError } = await supabase.from('partner_details').insert(rows);
+    if (insertError) {
+        console.error("Error inserting partner details:", insertError.message);
+        fetchData(); // Revert state on error
+    }
+  }, []);
+
+  const deletePartnerDetails = useCallback(async (year: string, month: string) => {
     setPartnerDetailsData(prevData => {
       const newData = JSON.parse(JSON.stringify(prevData));
       if (newData[year]?.[month]) {
         delete newData[year][month];
-        if (Object.keys(newData[year]).length === 0) {
-          delete newData[year];
-        }
+        if (Object.keys(newData[year]).length === 0) delete newData[year];
       }
-      saveData(newData);
       return newData;
     });
-  }, [saveData]);
+
+    const { error } = await supabase.from('partner_details').delete().match({ year, month });
+    if (error) {
+        console.error("Error deleting partner details:", error.message);
+        fetchData();
+    }
+  }, []);
 
   return { partnerDetailsData, addPartnerDetails, deletePartnerDetails };
 };
