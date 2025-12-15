@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 
 const StarIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={className} viewBox="0 0 20 20" fill="currentColor">
@@ -50,35 +50,29 @@ const GoogleRatingCard: React.FC = () => {
         const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
         const response = await ai.models.generateContent({
            model: "gemini-2.5-flash",
-           contents: "Qual é a nota de avaliação e o número de reviews da 'clinica roe' no Google?",
+           contents: "Pesquise a nota de avaliação e o número de reviews da 'clinica roe' no Google. Retorne APENAS um JSON válido com as chaves 'rating' (número) e 'reviewsCount' (número), sem formatação Markdown ou explicações.",
            config: {
              tools: [{googleSearch: {}}],
-             responseMimeType: "application/json",
-             responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  rating: {
-                    type: Type.NUMBER,
-                    description: 'A nota de avaliação de 0 a 5.'
-                  },
-                  reviewsCount: {
-                    type: Type.INTEGER,
-                    description: 'O número total de avaliações.'
-                  }
-                },
-                required: ['rating', 'reviewsCount']
-              }
+             // responseMimeType and responseSchema cannot be used with googleSearch tool
            },
         });
         
-        const jsonStr = response.text.trim();
-        const parsedData = JSON.parse(jsonStr);
+        let jsonStr = response.text || "";
+        // Clean up markdown code blocks if present
+        jsonStr = jsonStr.replace(/```json/g, '').replace(/```/g, '').trim();
+        
+        try {
+            const parsedData = JSON.parse(jsonStr);
 
-        if (typeof parsedData.rating === 'number' && typeof parsedData.reviewsCount === 'number') {
-            setRating(parsedData.rating);
-            setReviewsCount(parsedData.reviewsCount);
-        } else {
-            throw new Error("Dados recebidos do Gemini estão em formato inesperado, mesmo com schema.");
+            if (typeof parsedData.rating === 'number' && typeof parsedData.reviewsCount === 'number') {
+                setRating(parsedData.rating);
+                setReviewsCount(parsedData.reviewsCount);
+            } else {
+                throw new Error("Dados recebidos do Gemini estão em formato inesperado.");
+            }
+        } catch (parseError) {
+             console.error("Erro ao fazer parse do JSON:", parseError, jsonStr);
+             throw new Error("Falha ao processar resposta do Gemini");
         }
 
       } catch (e) {
